@@ -1,0 +1,52 @@
+name: Clean article chrome
+
+on:
+  push:
+    paths:
+      - '.github/workflows/cleanup-article.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  clean:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - name: Remove old article chrome
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path('posts/cve-2026-24061-telnet-negotiation.html')
+          s = p.read_text(encoding='utf-8')
+          s = re.sub(
+              r'<header class="site-header">.*?</header>',
+              '<header class="site-header">\n      <a class="brand" href="../index.html">maximus</a>\n      <nav><a href="../cv.html">cv</a></nav>\n    </header>',
+              s,
+              count=1,
+              flags=re.S,
+          )
+          s = re.sub(r'\s*<p class="prompt">.*?</p>', '', s, count=1, flags=re.S)
+          s = re.sub(r'\s*<p class="article-subtitle">.*?</p>', '', s, count=1, flags=re.S)
+          s = re.sub(
+              r'<div class="article-meta">.*?</div>',
+              '<div class="article-meta">2026-08-17</div>',
+              s,
+              count=1,
+              flags=re.S,
+          )
+          s = re.sub(r'\s*<footer>.*?</footer>', '', s, count=1, flags=re.S)
+          s = s.replace('href="../styles.css"', 'href="../styles.css?v=4"')
+          p.write_text(s, encoding='utf-8')
+          PY
+      - name: Commit cleaned article
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add posts/cve-2026-24061-telnet-negotiation.html
+          git diff --cached --quiet || git commit -m "Remove legacy chrome from article page"
+          git push
