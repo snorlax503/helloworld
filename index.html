@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Security notes, write-ups, tools and research.">
+  <meta name="description" content="Security research and notes.">
   <title>maximus // security</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
@@ -11,82 +11,21 @@
 <body>
   <div class="shell">
     <header class="site-header">
-      <a class="brand" href="/">maximus<span class="muted">://security</span></a>
-      <nav aria-label="Primary navigation">
-        <a href="#posts">posts</a>
-        <a href="#tools">tools</a>
-        <a href="#about">about</a>
-      </nav>
+      <a class="brand" href="./">maximus<span class="muted">://security</span></a>
     </header>
 
-    <main>
-      <section class="intro">
-        <p class="prompt"><span class="muted">$</span> whoami</p>
-        <h1>Security notes, research and things worth keeping.</h1>
-        <p class="lede">Red teaming, penetration testing, Active Directory, tooling and whatever else I am working on.</p>
-      </section>
+    <main class="home">
+      <p class="intro-line">Security research and notes.</p>
 
-      <section id="posts" class="section">
-        <div class="section-title">
-          <h2>latest</h2>
-          <span>notes / write-ups</span>
-        </div>
-
-        <div class="post-list">
-          <a class="post-row" href="posts/cve-2026-24061-telnet-negotiation.html">
-            <span class="date">2026-08-17</span>
-            <span class="post-title">255 First: A Deep Dive into CVE-2026-24061</span>
-            <span class="tag">research</span>
-          </a>
-
-          <a class="post-row" href="posts/first-note.html">
-            <span class="date">2026-08-17</span>
-            <span class="post-title">Starting the notebook</span>
-            <span class="tag">meta</span>
-          </a>
-        </div>
-      </section>
-
-      <section id="tools" class="section">
-        <div class="section-title">
-          <h2>tools</h2>
-          <span>small things I build</span>
-        </div>
-
-        <div class="tool-grid">
-          <article>
-            <div class="tool-top">
-              <h3>tls-evidence</h3>
-              <span>python</span>
-            </div>
-            <p>Parse TLS test output into report-ready evidence.</p>
-            <a href="#" aria-label="TLS evidence tool repository">github ↗</a>
-          </article>
-
-          <article>
-            <div class="tool-top">
-              <h3>coming-soon</h3>
-              <span>tool</span>
-            </div>
-            <p>Space for another useful script, project or proof of concept.</p>
-            <span class="muted">not published</span>
-          </article>
-        </div>
-      </section>
-
-      <section id="about" class="section about">
-        <div class="section-title">
-          <h2>about</h2>
-          <span>short version</span>
-        </div>
-        <p>Security consultant interested in offensive security, red teaming and practical research. This site is mainly a place to publish technical notes without turning them into marketing copy.</p>
-      </section>
+      <div class="post-list">
+        <a class="post-row" href="posts/cve-2026-24061-telnet-negotiation.html">
+          <span class="date">2026-08-17</span>
+          <span class="post-title">255 First: A Deep Dive into CVE-2026-24061</span>
+        </a>
+      </div>
     </main>
 
-    <footer>
-      <span>© 2026 maximus</span>
-      <span class="muted">built without a framework</span>
-    </footer>
+    <footer>© 2026 maximus</footer>
   </div>
 </body>
 </html>
