@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="An attack path from low-privileged domain access to Domain Admin through AD CS relay, credential reuse and Windows token impersonation.">
+  <title>Chaining AD CS Relay to Domain Admin // maximus</title>
+  <link rel="icon" href="../favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../styles.css?v=7">
+</head>
+<body>
+  <div class="shell">
+    <header class="site-header">
+      <a class="brand" href="../index.html">maximus</a>
+      <nav aria-label="Primary navigation"><a href="../cv.html">cv</a></nav>
+    </header>
+
+    <main>
+      <header class="article-header">
+        <h1>Chaining AD CS Relay to Domain Admin</h1>
+        <div class="article-meta">2026-08-18</div>
+      </header>
+      <article class="article" id="article-body"></article>
+    </main>
+  </div>
+
+  <script>
+    const dataRoot = 'data/chaining-adcs-relay/';
+
+    async function joinFiles(files) {
+      const parts = await Promise.all(files.map(file => fetch(dataRoot + file).then(r => {
+        if (!r.ok) throw new Error(`Failed to load ${file}`);
+        return r.text();
+      })));
+      return parts.join('');
+    }
+
+    async function loadPost() {
+      const article = document.getElementById('article-body');
+      try {
+        article.innerHTML = await joinFiles(['body-1.html', 'body-2.html', 'body-3.html', 'body-4.html']);
+
+        const [attackPath, tokenPath] = await Promise.all([
+          joinFiles(['attack-1.b64', 'attack-2.b64', 'attack-3.b64', 'attack-rest.b64']),
+          joinFiles(['token-1.b64', 'token-2.b64', 'token-3.b64', 'token-4.b64', 'token-5.b64', 'token-6.b64'])
+        ]);
+
+        const attackImg = document.getElementById('attack-path-img');
+        const tokenImg = document.getElementById('token-path-img');
+        if (attackImg) attackImg.src = 'data:image/webp;base64,' + attackPath.trim();
+        if (tokenImg) tokenImg.src = 'data:image/webp;base64,' + tokenPath.trim();
+      } catch (error) {
+        article.innerHTML = '<p>Unable to load article.</p>';
+        console.error(error);
+      }
+    }
+
+    loadPost();
+  </script>
+</body>
+</html>
