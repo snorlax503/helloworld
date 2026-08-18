@@ -316,9 +316,13 @@ a:hover {
 
 .cv-columns {
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
-  gap: 46px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 28px;
   align-items: start;
+}
+
+.cv-professional-skills {
+  margin-top: 74px;
 }
 
 .cv-role {
@@ -389,6 +393,10 @@ a:hover {
   .cv-columns {
     grid-template-columns: 1fr;
     gap: 24px;
+  }
+
+  .cv-professional-skills {
+    margin-top: 0;
   }
 
   .cv-contact {
