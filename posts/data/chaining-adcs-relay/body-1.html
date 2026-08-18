@@ -1,11 +1,3 @@
-<h2>Attack path summary</h2>
-<p>The route to Domain Admin did not rely on a single vulnerability. It  relied on several issues being present at the same time: AD CS relay  exposure, machine-account privilege, local administrative access, local  Administrator credential reuse, an active Domain Admin session on a  compromised host, and sufficient local privileges to duplicate that  user’s token.</p>
-<p>The attack path followed this sequence:</p>
-<figure class="article-figure">
-  <img id="attack-path-img" alt="Attack path from low-privileged domain credentials through AD CS abuse, host compromise, credential reuse and token impersonation to Domain Admin">
-  <figcaption>Attack path to Domain Admin.</figcaption>
-</figure>
-
 <h2>What was the initial foothold for this Advanced Threat Simulation?</h2>
 <p>The initial position for this phase was a valid low-privileged domain  account. This represented an internal foothold and allowed standard  domain enumeration to begin. The account did not have administrative  privileges at the start of the chain.</p>
 <p><code>certipy-ad find \</code>
