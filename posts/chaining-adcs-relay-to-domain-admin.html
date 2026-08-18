@@ -44,11 +44,6 @@
       try {
         article.innerHTML = await joinFiles(['body-1.html', 'body-2.html', 'body-3.html', 'body-4.html']);
 
-        const attackImg = document.getElementById('attack-path-img');
-        if (attackImg) {
-          attackImg.src = 'assets/chaining-adcs-relay/attack-path.webp?v=2';
-        }
-
         const tokenPath = await joinFiles(['token-1.b64', 'token-2.b64', 'token-3.b64', 'token-4.b64', 'token-5.b64', 'token-6.b64']);
         const tokenImg = document.getElementById('token-path-img');
         if (tokenImg) {
