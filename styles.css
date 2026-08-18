@@ -54,6 +54,12 @@ a:hover { text-decoration: underline; text-underline-offset: 4px; }
 }
 .theme-toggle:hover { color: var(--text); border-color: var(--muted); }
 .home { padding: 54px 0 72px; }
+.home-email {
+  margin: 0 0 18px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.home-email a { text-decoration: underline; text-underline-offset: 3px; }
 .post-list { border-top: 1px solid var(--line); }
 .post-row {
   min-height: 60px;
