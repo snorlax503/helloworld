@@ -41,6 +41,23 @@ a:hover { text-decoration: underline; text-underline-offset: 4px; }
 .site-header nav { display: flex; align-items: center; gap: 16px; line-height: 1; }
 .site-header nav .nav-link { color: var(--text); font-size: 14px; font-weight: 700; }
 .site-header nav .nav-link[aria-current="page"] { color: var(--text); }
+.nav-email {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  line-height: 1.1;
+}
+.nav-email span {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
+}
+.nav-email a {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 400;
+}
+.nav-email a:hover { color: var(--text); }
 .theme-toggle {
   appearance: none;
   border: 1px solid var(--line);
@@ -54,12 +71,6 @@ a:hover { text-decoration: underline; text-underline-offset: 4px; }
 }
 .theme-toggle:hover { color: var(--text); border-color: var(--muted); }
 .home { padding: 54px 0 72px; }
-.home-email {
-  margin: 0 0 18px;
-  color: var(--muted);
-  font-size: 12px;
-}
-.home-email a { text-decoration: underline; text-underline-offset: 3px; }
 .post-list { border-top: 1px solid var(--line); }
 .post-row {
   min-height: 60px;
@@ -163,8 +174,9 @@ a:hover { text-decoration: underline; text-underline-offset: 4px; }
 
 @media (max-width: 640px) {
   .shell { width: min(calc(100% - 28px), var(--max)); }
-  .site-header { height: 62px; }
+  .site-header { height: auto; min-height: 62px; padding: 10px 0; }
   .site-header nav { gap: 10px; }
+  .nav-email a { font-size: 9px; }
   .theme-toggle { padding: 4px 6px; font-size: 10px; }
   .home { padding: 40px 0 56px; }
   .post-row { grid-template-columns: 1fr; gap: 1px; padding: 13px 0; }
