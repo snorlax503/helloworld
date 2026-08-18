@@ -41,23 +41,12 @@ a:hover { text-decoration: underline; text-underline-offset: 4px; }
 .site-header nav { display: flex; align-items: center; gap: 16px; line-height: 1; }
 .site-header nav .nav-link { color: var(--text); font-size: 14px; font-weight: 700; }
 .site-header nav .nav-link[aria-current="page"] { color: var(--text); }
-.nav-email {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  line-height: 1.1;
-}
-.nav-email span {
-  color: var(--text);
-  font-size: 14px;
-  font-weight: 700;
-}
-.nav-email a {
+.nav-email-link {
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 400;
 }
-.nav-email a:hover { color: var(--text); }
+.nav-email-link:hover { color: var(--text); }
 .theme-toggle {
   appearance: none;
   border: 1px solid var(--line);
@@ -176,7 +165,7 @@ a:hover { text-decoration: underline; text-underline-offset: 4px; }
   .shell { width: min(calc(100% - 28px), var(--max)); }
   .site-header { height: auto; min-height: 62px; padding: 10px 0; }
   .site-header nav { gap: 10px; }
-  .nav-email a { font-size: 9px; }
+  .nav-email-link { font-size: 10px; }
   .theme-toggle { padding: 4px 6px; font-size: 10px; }
   .home { padding: 40px 0 56px; }
   .post-row { grid-template-columns: 1fr; gap: 1px; padding: 13px 0; }
