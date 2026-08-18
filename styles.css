@@ -1,9 +1,19 @@
 :root {
+  --bg: #fff;
   --text: #111;
   --muted: #777;
   --line: #e6e6e6;
   --soft: #f7f7f7;
   --max: 880px;
+}
+
+html[data-theme="dark"] {
+  --bg: #0d0d0d;
+  --text: #e8e8e8;
+  --muted: #9a9a9a;
+  --line: #2a2a2a;
+  --soft: #161616;
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -12,7 +22,7 @@ html { scroll-behavior: smooth; }
 
 body {
   margin: 0;
-  background: #fff;
+  background: var(--bg);
   color: var(--text);
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
   font-size: 14px;
@@ -51,16 +61,35 @@ a:hover {
 .site-header nav {
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 16px;
   line-height: 1;
 }
 
-.site-header nav a {
-  color: var(--muted);
+.site-header nav .nav-link {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
 }
 
-.site-header nav a[aria-current="page"] {
+.site-header nav .nav-link[aria-current="page"] {
   color: var(--text);
+}
+
+.theme-toggle {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  padding: 5px 8px;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.1;
+  cursor: pointer;
+}
+
+.theme-toggle:hover {
+  color: var(--text);
+  border-color: var(--muted);
 }
 
 .home {
@@ -232,7 +261,7 @@ a:hover {
 
 .cv-contact span {
   padding: 0 7px;
-  color: #aaa;
+  color: var(--muted);
 }
 
 .cv-contact a {
@@ -308,6 +337,15 @@ a:hover {
 
   .site-header {
     height: 62px;
+  }
+
+  .site-header nav {
+    gap: 10px;
+  }
+
+  .theme-toggle {
+    padding: 4px 6px;
+    font-size: 10px;
   }
 
   .home {
