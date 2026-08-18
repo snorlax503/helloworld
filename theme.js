@@ -15,7 +15,22 @@
     });
   };
 
+  const ensureAboutLink = () => {
+    const nav = document.querySelector('.site-header nav');
+    if (!nav || nav.querySelector('a[href$="about.html"]')) return;
+
+    const cvLink = nav.querySelector('a[href$="cv.html"]');
+    if (!cvLink) return;
+
+    const about = document.createElement('a');
+    about.className = 'nav-link';
+    about.href = window.location.pathname.includes('/posts/') ? '../about.html' : 'about.html';
+    about.textContent = 'about';
+    nav.insertBefore(about, cvLink);
+  };
+
   document.addEventListener('DOMContentLoaded', () => {
+    ensureAboutLink();
     updateLabels();
 
     document.querySelectorAll('[data-theme-toggle]').forEach((button) => {
