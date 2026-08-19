@@ -1,0 +1,45 @@
+<h2>Overview</h2>
+<p>During an authorised internal security assessment, a Certificate Authority was identified with a Windows build that appeared to pre-date the security update for CVE-2026-54121, commonly referred to as CertiGhost. Validation required correcting Certificate Authority discovery across a multi-domain forest, identifying effective certificate template permissions and testing reverse connectivity from the Certificate Authority to the assessment host.</p>
+<p>Full CertiGhost exploitation was not demonstrated because the Certificate Authority could not reach the required rogue SMB and LDAP listeners. Separate template enumeration identified an ESC1 misconfiguration that allowed the supplied low-privileged account to request a certificate for the forest-root Administrator identity and obtain forest-wide administrative access.</p>
+<p>This article describes the methodology and lessons from that process rather than presenting a client-specific attack transcript. Every domain, address, hostname, account, SID, certificate template and request identifier has been replaced with fictional data. No passwords, private keys, certificates or reusable credential material have been included.</p>
+<h2>Anonymised Assessment Environment</h2>
+<p>The environment used a multi-domain Active Directory forest. The supplied assessment account belonged to a child domain, while the enterprise Certificate Authority and its associated certificate templates belonged to the forest-root domain.</p>
+<pre><code class="language-text">Child domain: child.example
+Forest-root domain: corp.example
+Low-privileged account: audit.user@child.example
+Child-domain controller: CHILD-DC01.child.example (192.0.2.10)
+Forest-root PDC: ROOT-DC01.corp.example (192.0.2.20)
+Certificate Authority host: CA01.corp.example (192.0.2.30)
+Certificate Authority service: CORP-CA
+Office assessment host: 198.51.100.25
+VPN-assigned address: 203.0.113.25/32</code></pre>
+<p>The office assessment host could connect through a VPN into the data-centre networks. That allowed normal attacker-to-target connections to LDAP, SMB, RPC and Kerberos services. It did not mean that data-centre systems could initiate connections back to either the VPN-assigned address or the underlying office address. That distinction became important later.</p>
+<h2>CertiGhost Technical Overview</h2>
+<p>The public CertiGhost proof of concept creates or reuses a controlled computer account and starts rogue SMB and LDAP services on TCP ports <code>445</code> and <code>389</code>. It then submits a certificate request containing a custom <code>cdc</code> value that directs the CA to an attacker-controlled address and an <code>rmd</code> value containing the DNS identity of the computer being impersonated.</p>
+<p>When the vulnerable processing path is reached, the CA connects to the supplied callback address. The rogue services authenticate as the controlled computer through the legitimate domain controller but answer the CA's directory lookups using the target computer's identity. If the selected template builds its subject information from Active Directory and the request is accepted, the CA can issue a certificate mapped to the target computer rather than the controlled computer.</p>
+<p>The public PoC then uses the resulting certificate for PKINIT, saves a Kerberos credential cache and attempts to recover the target account's NT hash. Because the rogue services bind to privileged ports, the PoC must run with sufficient local privileges.</p>
+<pre><code class="language-text">Controlled computer -&gt; certificate request containing cdc and rmd
+Certificate Authority -&gt; callback to rogue SMB/LDAP services
+Rogue services -&gt; return target computer identity
+Certificate Authority -&gt; certificate issued for target identity
+Certificate -&gt; PKINIT -&gt; TGT and target credential material</code></pre>
+<p>This is not simply a matter of locating an unpatched server and running a script. The selected template must trigger the relevant directory lookup behaviour, the requesting principal must be authorised to enrol, the CA must be able to reach the rogue listeners, and the assessment host must be able to complete the supporting LDAP, Netlogon and Kerberos operations.</p>
+<h2>NetExec Module Verification</h2>
+<p>The first complication was not Active Directory but the local NetExec installation. The installed package did not initially contain the <code>enum_cve</code> module. Updating a distribution package is not always equivalent to installing the current upstream project, and multiple <code>nxc</code> executables can exist on the same system.</p>
+<p>The active binary, version and module availability should be checked before drawing conclusions from a missing module:</p>
+<pre><code class="language-bash">command -v -a nxc
+nxc --version
+nxc smb -L | grep -i enum_cve</code></pre>
+<p>The current NetExec module supports SMB rather than LDAP because it reads the Windows build and Update Build Revision from the remote registry. Attempting to launch it through the LDAP protocol therefore produced a protocol support error:</p>
+<pre><code class="language-text">[-] Module ENUM_CVE is not supported for protocol ldap</code></pre>
+<p>The correct invocation used SMB:</p>
+<pre><code class="language-bash">nxc smb 192.0.2.30 -d child.example -u &#x27;audit.user&#x27; -p &quot;$USER_PASS&quot; -M enum_cve -o CVE=CVE-2026-54121</code></pre>
+<p>The check reported that the host might be vulnerable to CertiGhost. The wording matters. The module compares the operating system build and UBR against a minimum patched version. Its own documentation states that it does not confirm whether the vulnerable component is installed, whether the relevant configuration exists or whether compensating controls prevent exploitation.</p>
+<pre><code class="language-text">ENUM_CVE  192.0.2.30  445  CA01  CVE-2026-54121 - Certighost - If host is an AD CS / CA server, it may be vulnerable to Certighost</code></pre>
+<p>A build check is a useful lead, not proof of vulnerability. It should trigger configuration review and controlled validation rather than being reported as successful exploitation by itself.</p>
+<h2>AD CS Discovery Across Domain Boundaries</h2>
+<p>The next issue was caused by the forest structure. The supplied account and initial DC belonged to <code>child.example</code>, but the Configuration partition was rooted beneath <code>corp.example</code>.</p>
+<p>Querying RootDSE made the distinction clear:</p>
+<pre><code class="language-text">defaultNamingContext: DC=child,DC=example
+configurationNamingContext: CN=Configuration,DC=corp,DC=example
+rootDomainNamingContext: DC=corp,DC=example</code></pre>
