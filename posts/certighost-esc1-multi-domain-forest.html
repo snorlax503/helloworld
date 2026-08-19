@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="CertiGhost validation and AD CS ESC1 exploitation in a multi-domain Active Directory forest, covering CA discovery, template permissions, callback constraints and certificate-based privilege escalation.">
+  <title>CertiGhost Validation and AD CS ESC1 Exploitation in a Multi-Domain Forest // maximus</title>
+  <link rel="icon" href="../favicon.svg" type="image/svg+xml">
+  <script src="../theme.js"></script>
+  <link rel="stylesheet" href="../styles.css?v=16">
+</head>
+<body>
+  <div class="shell">
+    <header class="site-header">
+      <a class="brand" href="../index.html">maximus</a>
+      <nav aria-label="Primary navigation">
+        <a class="nav-link" href="../about.html">about</a>
+        <a class="nav-link" href="../cv.html">cv</a>
+        <button class="theme-toggle" type="button" data-theme-toggle>turn the lights off</button>
+      </nav>
+    </header>
+
+    <main>
+      <header class="article-header">
+        <h1>CertiGhost Validation and AD CS ESC1 Exploitation in a Multi-Domain Forest</h1>
+        <div class="article-meta">2026-08-19</div>
+      </header>
+      <article class="article" id="article-body"></article>
+    </main>
+  </div>
+
+  <script>
+    async function loadPost() {
+      const root = 'data/certighost-esc1/';
+      const files = ['body-1.html', 'body-2.html', 'body-3.html', 'body-4.html', 'body-5.html'];
+      const article = document.getElementById('article-body');
+      try {
+        const parts = await Promise.all(files.map(file => fetch(root + file).then(response => {
+          if (!response.ok) throw new Error(`Failed to load ${file}`);
+          return response.text();
+        })));
+        article.innerHTML = parts.join('');
+      } catch (error) {
+        article.innerHTML = '<p>Unable to load article.</p>';
+        console.error(error);
+      }
+    }
+    loadPost();
+  </script>
+</body>
+</html>
