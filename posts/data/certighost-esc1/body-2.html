@@ -1,0 +1,40 @@
+<p>The default naming context represented the domain handled by the current DC. The Configuration naming context was forest-wide and contained the AD CS enrolment service objects and certificate templates. Tooling that constructed <code>CN=Configuration,DC=child,DC=example</code> from the supplied child-domain name queried an object that did not exist and returned <code>noSuchObject</code>.</p>
+<p>The correct approach was to trust the naming contexts returned by RootDSE rather than deriving them from the authentication domain. The CA enrolment service could be located beneath the actual Configuration partition:</p>
+<pre><code class="language-bash">ldapsearch -LLL -x -H ldap://192.0.2.10 -D &#x27;child.example\audit.user&#x27; -W -b &#x27;CN=Enrollment Services,CN=Public Key Services,CN=Services,CN=Configuration,DC=corp,DC=example&#x27; &#x27;(objectClass=pKIEnrollmentService)&#x27; cn dNSHostName</code></pre>
+<p>The sanitised result separated two values that are often confused:</p>
+<pre><code class="language-text">cn: CORP-CA
+dNSHostName: CA01.corp.example</code></pre>
+<p><code>CORP-CA</code> was the CA service name expected by certificate RPC requests. <code>CA01.corp.example</code> was the DNS hostname of the Windows server running the service. Supplying the hostname where the PoC expected the CA service name, or omitting the explicit CA IP, caused requests to be directed to the wrong endpoint.</p>
+<h2>Forest-Root Domain Controller Discovery</h2>
+<p>The forest-root DCs were then identified using DNS SRV records. Querying the child DC as the DNS server avoided relying on the assessment host's local resolver configuration:</p>
+<pre><code class="language-bash">for host in $(dig +short @192.0.2.10 _ldap._tcp.dc._msdcs.corp.example SRV | awk &#x27;{print $4}&#x27; | sed &#x27;s/\.$//&#x27;); do printf &#x27;%s -&gt; &#x27; &quot;$host&quot;; dig +short @192.0.2.10 &quot;$host&quot; A | paste -sd,; done</code></pre>
+<p>A generic SRV query can return multiple DCs in varying order. Selecting the first line with <code>awk 'NR==1'</code> therefore selected an inaccessible DC during the first attempt. The PDC-specific record provided a consistent target for the forest-root operations:</p>
+<pre><code class="language-bash">dig +short @192.0.2.10 _ldap._tcp.pdc._msdcs.corp.example SRV</code></pre>
+<pre><code class="language-text">0 100 389 ROOT-DC01.corp.example.</code></pre>
+<p>An Nmap check against the first generic result appeared to state that the host was online, but the command had used <code>-Pn</code>. In that mode, Nmap skips host discovery and assumes the target is up. The accompanying text <code>Host is up, received user-set</code> meant the user had instructed Nmap to proceed; it did not mean the host had replied. All tested ports returned no response.</p>
+<p>This was a small but important lesson. DNS registration, host reachability and service reachability are separate questions, and tooling output should be read in the context of the options supplied.</p>
+<h2>Incorrect Certificate Authority Endpoint</h2>
+<p>The first PoC attempt supplied the CA service name but omitted the explicit CA IP. The script fell back to the supplied DC address and attempted certificate RPC against a domain controller that was not running the CA service.</p>
+<pre><code class="language-text">DC: 192.0.2.10
+CA service: CORP-CA
+CA endpoint incorrectly selected: 192.0.2.10</code></pre>
+<p>The resulting error was:</p>
+<pre><code class="language-text">ept_s_not_registered</code></pre>
+<p>This indicated that the expected RPC interface was not registered at the selected endpoint. It was not evidence that CertiGhost had been patched or that the template was safe. Supplying the correct CA service name and CA server IP resolved the endpoint error:</p>
+<pre><code class="language-text">--ca CORP-CA
+--ca-ip 192.0.2.30</code></pre>
+<h2>Certificate Template Enrolment Permissions</h2>
+<p>The PoC defaulted to the <code>Machine</code> template. This template contained the required DNS name flags and permitted client authentication, making it technically suitable for the directory chase. The first controlled computer account had, however, been created in the child domain.</p>
+<p>The template's enrolment permissions granted access to the forest-root <code>Domain Computers</code> group. A child-domain computer had a different domain SID and was not a member of that group. Authentication to the CA succeeded, but the certificate request was denied by policy:</p>
+<pre><code class="language-text">0x80094012: Denied by Policy Module</code></pre>
+<p>This error was easy to misinterpret because the controlled computer was valid and could authenticate. The failure occurred later, when the CA evaluated the template ACL. Template suitability and effective enrolment rights must be assessed separately.</p>
+<p>A controlled computer was then created in the forest-root domain. The first standalone Impacket attempt timed out because it tried to reach RPC endpoint mapper on TCP port <code>135</code>, which was filtered from the assessment host. NetExec's <code>add-computer</code> module used the SMB <code>\\samr</code> named pipe directly and succeeded when TCP port <code>445</code> was available.</p>
+<pre><code class="language-bash">ROOT_MACHINE=&#x27;AUDITPC01$&#x27;; ROOT_MACHINE_PASS=&#x27;&lt;REDACTED&gt;&#x27;; nxc smb 192.0.2.20 -d child.example -u &#x27;audit.user&#x27; -p &quot;$USER_PASS&quot; -M add-computer -o NAME=&quot;$ROOT_MACHINE&quot; PASSWORD=&quot;$ROOT_MACHINE_PASS&quot;</code></pre>
+<p>The new account belonged to the root-domain <code>Domain Computers</code> group and could use the <code>Machine</code> template. This removed the template ACL blocker but exposed the final CertiGhost dependency.</p>
+<h2>Certificate Authority Callback Connectivity</h2>
+<p>With the correct CA endpoint, root-domain computer account and suitable template, the request reached the callback stage. The CA returned:</p>
+<pre><code class="language-text">0x800706ba: RPC_S_SERVER_UNAVAILABLE</code></pre>
+<p>The PoC debug output described this as a wrapper for a CA-side callback failure. The rogue services were listening successfully on <code>0.0.0.0:445</code> and <code>0.0.0.0:389</code>, but no inbound connection appeared in their logs.</p>
+<p>Packet capture confirmed that no callback traffic reached the assessment host:</p>
+<pre><code class="language-bash">sudo tcpdump -ni any -nn &#x27;src host 192.0.2.30 and tcp and (dst port 389 or dst port 445)&#x27;</code></pre>
+<p>The first listener address was a VPN-assigned <code>/32</code>. It allowed the Kali system to initiate connections into the data centre, but unsolicited data-centre-to-client connections were not passed back through the VPN. The underlying office address was also tested because the office and data-centre networks were connected, but the CA could not reach the required ports there either.</p>
